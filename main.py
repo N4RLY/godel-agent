@@ -156,7 +156,7 @@ def reflect(code: str, goal: str) -> str:
 
 goal = "Make a for loop that prints 'Hello, World!' 10 times"
 answer = ''
-max_depth = 2
+max_depth = 10
 
 if __name__ == "__main__":
     # Initialize the agent
