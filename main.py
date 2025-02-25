@@ -74,7 +74,8 @@ def get_improvement_prompt(code: str, goal: str) -> str:
     Current code: {code}
     Improvement goal: {goal}
 
-    Suggest improvements to the solve function while maintaining the code's core functionality.
+    If you think that the code is already satisfactory, please respond with the same code.
+    Otherwise, suggest improvements to the code while maintaining its core functionality.
     Return ONLY the complete updated class definition without any markdown formatting or explanatory text.
     The response should contain the entire class definition directly with 'class GodelAgent:' and contain only Python code.
     For example:
@@ -108,7 +109,7 @@ def modify_code(code: str) -> str:
         
         new_instance = new_agent_class()
         new_instance.history = agent.history.copy()
-        new_instance.version = agent.version + 0.1
+        new_instance.version = round(agent.version + 0.1, 2)
         new_instance.modifications = agent.modifications + [time.time()]
         
         agent.__class__ = new_instance.__class__
@@ -155,6 +156,11 @@ def fix_code_with_llm(failed_code: str, goal: str) -> str:
     """
     return call_gpt4(prompt)
 
+
+goal = "Return the result of exp^10"
+answer = ''
+max_depth = 2
+
 if __name__ == "__main__":
     # Initialize the agent
     agent = GodelAgent()
@@ -163,17 +169,18 @@ if __name__ == "__main__":
     # Execute the improvement loop
     try:
         # Start recursive improvement
-        max_depth = 3
         depth = 0
         while depth < max_depth:
             logger.info(f"Starting recursive improvement at depth {depth}...")
             
             # Get current state
             current_code = get_current_code()
-            goal = "Return the result of 1+1"
             # Generate and process improvement
             prompt = get_improvement_prompt(current_code, goal)
             suggested_code = call_gpt4(prompt)
+            if suggested_code == current_code:
+                logger.info("No changes needed. Exiting the improvement process.")
+                break
             logger.info(f"Suggested code: {suggested_code}")
             code = clean_code(suggested_code)
             logger.info(f"Cleaned code: {code}")
@@ -183,7 +190,10 @@ if __name__ == "__main__":
                 if validate_code(code):
                     modify_code(code)
                     save_modified_code_to_file(code, agent.version)
-                    depth += 1
+                    if answer and agent.solve()==answer:
+                        depth = max_depth
+                    else:
+                        depth += 1
                     break
                 else:
                     logger.warning(f"Code validation failed at depth {depth}")
@@ -194,6 +204,6 @@ if __name__ == "__main__":
 
         logger.info("Final state:")
         logger.info(reflect(agent))
-        logger.info(agent.solve())
+        logger.info(f"Final solution: {agent.solve()}")
     except Exception as e:
         logger.error(f"An error occurred during the improvement process: {e}")
