@@ -51,7 +51,7 @@ def call_gpt4(prompt: str) -> str:
                 {"role": "system", "content": "You are an AI assistant helping to improve code."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
+            temperature=0,
             max_tokens=5000
         )
         return response.choices[0].message.content
@@ -62,17 +62,18 @@ def call_gpt4(prompt: str) -> str:
 def get_current_code() -> str:
     logger.info("Inspecting source code.")
     try:
-        return inspect.getsource(GodelAgent)
+        import agent
+        return inspect.getsource(agent)
     except Exception as e:
         logger.error(f"Failed to get source code: {str(e)}")
     return ""
 
-def get_improvement_prompt(code: str, goal: str) -> str:
-    """Generate the prompt for code improvement."""
-    return f"""
+def improve_code(code: str, goal: str, improvements: str) -> str:
+    prompt = f"""
     Given the following:
     Current code: {code}
     Improvement goal: {goal}
+    Suggested improvements: {improvements}
 
     If you think that the code is already satisfactory, please respond with the same code.
     Otherwise, suggest improvements to the code while maintaining its core functionality.
@@ -87,8 +88,9 @@ def get_improvement_prompt(code: str, goal: str) -> str:
             pass
     ```
     """
+    return call_gpt4(prompt)
 
-def save_modified_code_to_file(code: str, version: float) -> None:
+def save_modified_code_to_file(code: str) -> None:
     """Save the modified code to a file with versioning."""
     filename = f"agent.py"
     try:
@@ -108,31 +110,15 @@ def modify_code(code: str) -> str:
             raise ValueError("New class definition not found in the provided code.")
         
         new_instance = new_agent_class()
-        new_instance.history = agent.history.copy()
-        new_instance.version = round(agent.version + 0.1, 2)
-        new_instance.modifications = agent.modifications + [time.time()]
         
         agent.__class__ = new_instance.__class__
         agent.__dict__.update(new_instance.__dict__)
         
-        agent.history.append({
-            'timestamp': time.time(),
-            'version': agent.version,
-            'new_code': code
-        })
-        logger.info(f"Successfully updated to version {agent.version}")
+        logger.info(f"Successfully updated agent")
         time.sleep(1)  # Add a small delay to prevent too rapid modifications
 
     except Exception as e:
         logger.error(f"Self-modification failed: {e}")
-
-def reflect(agent: GodelAgent) -> dict:
-    """Return a reflection of the agent's current state."""
-    return {
-        'version': agent.version,
-        'num_modifications': len(agent.modifications),
-        'history': agent.history
-    }
 
 def fix_code_with_llm(failed_code: str, goal: str) -> str:
     """Use LLM to suggest fixes for the provided code that failed validation."""
@@ -156,8 +142,19 @@ def fix_code_with_llm(failed_code: str, goal: str) -> str:
     """
     return call_gpt4(prompt)
 
+def reflect(code: str, goal: str) -> str:
+    """Reflect on the current code and the improvement goal using OpenAI."""
+    prompt = f"""
+    Evaluate the following code against the goal:
+    Current code: {code}
+    Improvement goal: {goal}
+    You need to suggest improvements to the solve() method.
+    If the code is satisfactory, and the goal is met, respond with 'No changes needed.' Otherwise, suggest improvements.
+    Return ONLY the improvements without any code itself.
+    """
+    return call_gpt4(prompt)
 
-goal = "Return the result of exp^10"
+goal = "Make a for loop that prints 'Hello, World!' 10 times"
 answer = ''
 max_depth = 2
 
@@ -172,24 +169,28 @@ if __name__ == "__main__":
         depth = 0
         while depth < max_depth:
             logger.info(f"Starting recursive improvement at depth {depth}...")
-            
             # Get current state
             current_code = get_current_code()
-            # Generate and process improvement
-            prompt = get_improvement_prompt(current_code, goal)
-            suggested_code = call_gpt4(prompt)
-            if suggested_code == current_code:
+
+            reflection_result = reflect(get_current_code(), goal)
+            if reflection_result == 'No changes needed.':
                 logger.info("No changes needed. Exiting the improvement process.")
                 break
-            logger.info(f"Suggested code: {suggested_code}")
-            code = clean_code(suggested_code)
+            logger.info(f"Reflection suggested improvements: {reflection_result}")
+
+            # Generate and process improvement
+            improved_code = improve_code(current_code, goal, reflection_result)
+            code = clean_code(improved_code)
+            if code == current_code:
+                logger.info("No changes needed. Exiting the improvement process.")
+                break
             logger.info(f"Cleaned code: {code}")
             
             retries = 0
             while retries < 2:
                 if validate_code(code):
                     modify_code(code)
-                    save_modified_code_to_file(code, agent.version)
+                    save_modified_code_to_file(code)
                     if answer and agent.solve()==answer:
                         depth = max_depth
                     else:
@@ -203,7 +204,6 @@ if __name__ == "__main__":
                     retries += 1
 
         logger.info("Final state:")
-        logger.info(reflect(agent))
         logger.info(f"Final solution: {agent.solve()}")
     except Exception as e:
         logger.error(f"An error occurred during the improvement process: {e}")
